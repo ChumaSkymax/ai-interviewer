@@ -64,8 +64,19 @@ const AuthForm = ({ type }: { type: FormType }) => {
           return;
         }
 
-        toast.success("Account created successfully. Please sign in.");
-        router.push("/sign-in");
+        // Automatically sign the user in by exchanging the client ID token
+        const idToken = await userCredential.user.getIdToken();
+        const signInResult = await signIn({ email, idToken });
+
+        if (!signInResult?.success) {
+          toast.error(signInResult?.message ?? "Sign in failed. Please sign in manually.");
+          router.push("/sign-in");
+          return;
+        }
+
+        toast.success("Account created and signed in successfully.");
+        router.refresh();
+        router.push("/");
       } else {
         const { email, password } = data;
 
@@ -81,12 +92,15 @@ const AuthForm = ({ type }: { type: FormType }) => {
           return;
         }
 
-        await signIn({
-          email,
-          idToken,
-        });
+        const signInResult = await signIn({ email, idToken });
+
+        if (!signInResult?.success) {
+          toast.error(signInResult?.message ?? "Sign in failed. Please try again.");
+          return;
+        }
 
         toast.success("Signed in successfully.");
+        router.refresh();
         router.push("/");
       }
     } catch (error) {

@@ -11,15 +11,31 @@ import {
 } from "@/lib/actions/general.action";
 
 async function Home() {
-  const user = await getCurrentUser();
+  let user = null;
+  try {
+    user = await getCurrentUser();
+  } catch (err) {
+    console.error("Error fetching current user:", err);
+    user = null;
+  }
 
-  const [userInterviews, allInterview] = await Promise.all([
-    getInterviewsByUserId(user?.id!),
-    getLatestInterviews({ userId: user?.id! }),
-  ]);
+  let userInterviews: Interview[] = [];
+  let allInterview: Interview[] = [];
+  try {
+    const res = await Promise.all([
+      getInterviewsByUserId(user?.id ?? ""),
+      getLatestInterviews({ userId: user?.id ?? "" }),
+    ]);
+    userInterviews = res[0] ?? [];
+    allInterview = res[1] ?? [];
+  } catch (err) {
+    console.error("Error fetching interviews:", err);
+    userInterviews = [];
+    allInterview = [];
+  }
 
-  const hasPastInterviews = userInterviews?.length! > 0;
-  const hasUpcomingInterviews = allInterview?.length! > 0;
+  const hasPastInterviews = (userInterviews?.length ?? 0) > 0;
+  const hasUpcomingInterviews = (allInterview?.length ?? 0) > 0;
 
   return (
     <>

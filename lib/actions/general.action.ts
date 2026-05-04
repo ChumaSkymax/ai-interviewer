@@ -4,10 +4,12 @@ import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 
 import { db } from "@/firebase/admin";
+import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { feedbackSchema } from "@/constants";
 
 export async function createFeedback(params: CreateFeedbackParams) {
   const { interviewId, userId, transcript, feedbackId } = params;
+  const dbInstance = await db;
 
   try {
     const formattedTranscript = transcript
@@ -52,9 +54,9 @@ export async function createFeedback(params: CreateFeedbackParams) {
     let feedbackRef;
 
     if (feedbackId) {
-      feedbackRef = db.collection("feedback").doc(feedbackId);
+      feedbackRef = dbInstance.collection("feedback").doc(feedbackId);
     } else {
-      feedbackRef = db.collection("feedback").doc();
+      feedbackRef = dbInstance.collection("feedback").doc();
     }
 
     await feedbackRef.set(feedback);
@@ -67,7 +69,8 @@ export async function createFeedback(params: CreateFeedbackParams) {
 }
 
 export async function getInterviewById(id: string): Promise<Interview | null> {
-  const interview = await db.collection("interviews").doc(id).get();
+  const dbInstance = await db;
+  const interview = await dbInstance.collection("interviews").doc(id).get();
 
   return interview.data() as Interview | null;
 }
@@ -77,7 +80,9 @@ export async function getFeedbackByInterviewId(
 ): Promise<Feedback | null> {
   const { interviewId, userId } = params;
 
-  const querySnapshot = await db
+  const dbInstance = await db;
+
+  const querySnapshot = await dbInstance
     .collection("feedback")
     .where("interviewId", "==", interviewId)
     .where("userId", "==", userId)
@@ -95,31 +100,69 @@ export async function getLatestInterviews(
 ): Promise<Interview[] | null> {
   const { userId, limit = 20 } = params;
 
-  const interviews = await db
+  const dbInstance = await db;
+  // Firestore requires a composite index for queries that mix `!=` inequalities
+  // with `orderBy`. The error you saw is Firestore telling you an index is needed.
+  // Two options:
+  // 1) Create the composite index in Firebase Console (recommended for large datasets),
+  // 2) Avoid the `!=` query and filter client/server-side after fetching by createdAt.
+  // We'll take option 2 here to avoid requiring an index.
+
+  const queryLimit = Math.max(limit * 3, limit + 10);
+  const snapshot = await dbInstance
     .collection("interviews")
-    .orderBy("createdAt", "desc")
     .where("finalized", "==", true)
-    .where("userId", "!=", userId)
-    .limit(limit)
+    .limit(queryLimit)
     .get();
 
-  return interviews.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as Interview[];
+  const all = snapshot.docs.map((doc: QueryDocumentSnapshot<Interview>) => {
+    const data = doc.data() as Interview;
+    const item: Interview = {
+      ...(data as Omit<Interview, "id">),
+      id: doc.id,
+    };
+    return item;
+  });
+
+  // Sort in code by `createdAt` (descending) to avoid requiring a composite
+  // Firestore index for this query. `createdAt` is stored as an ISO string.
+  all.sort(
+    (a: Interview, b: Interview) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  const filtered = userId
+    ? all.filter((i: Interview) => i.userId !== userId)
+    : all;
+
+  return filtered.slice(0, limit) as Interview[];
 }
 
 export async function getInterviewsByUserId(
   userId: string
 ): Promise<Interview[] | null> {
-  const interviews = await db
+  const dbInstance = await db;
+
+  // Avoid requiring a composite index: fetch user's interviews and sort in code
+  const snapshot = await dbInstance
     .collection("interviews")
     .where("userId", "==", userId)
-    .orderBy("createdAt", "desc")
     .get();
 
-  return interviews.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  })) as Interview[];
+  const results = snapshot.docs.map((doc: QueryDocumentSnapshot<Interview>) => {
+    const data = doc.data() as Interview;
+    const item: Interview = {
+      ...(data as Omit<Interview, "id">),
+      id: doc.id,
+    };
+    return item;
+  });
+
+  // createdAt is stored as ISO string; sort descending by timestamp
+  results.sort(
+    (a: Interview, b: Interview) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  return results as Interview[];
 }

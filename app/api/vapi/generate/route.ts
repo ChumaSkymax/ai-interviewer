@@ -6,6 +6,7 @@ import { getRandomInterviewCover } from "@/lib/utils";
 
 export async function POST(request: Request) {
   const { type, role, level, techstack, amount, userid } = await request.json();
+  const dbInstance = await db;
 
   try {
     const { text: questions } = await generateText({
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
 
-    await db.collection("interviews").add(interview);
+    await dbInstance.collection("interviews").add(interview);
 
     return Response.json({ success: true }, { status: 200 });
   } catch (error) {

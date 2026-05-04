@@ -9,9 +9,10 @@ const SESSION_DURATION = 60 * 60 * 24 * 7;
 // Set session cookie
 export async function setSessionCookie(idToken: string) {
   const cookieStore = await cookies();
+  const authInstance = await auth;
 
   // Create session cookie
-  const sessionCookie = await auth.createSessionCookie(idToken, {
+  const sessionCookie = await authInstance.createSessionCookie(idToken, {
     expiresIn: SESSION_DURATION * 1000, // milliseconds
   });
 
@@ -27,10 +28,11 @@ export async function setSessionCookie(idToken: string) {
 
 export async function signUp(params: SignUpParams) {
   const { uid, name, email } = params;
+  const dbInstance = await db;
 
   try {
     // check if user exists in db
-    const userRecord = await db.collection("users").doc(uid).get();
+    const userRecord = await dbInstance.collection("users").doc(uid).get();
     if (userRecord.exists)
       return {
         success: false,
@@ -38,7 +40,7 @@ export async function signUp(params: SignUpParams) {
       };
 
     // save user to db
-    await db.collection("users").doc(uid).set({
+    await dbInstance.collection("users").doc(uid).set({
       name,
       email,
       // profileURL,
@@ -71,7 +73,8 @@ export async function signIn(params: SignInParams) {
   const { email, idToken } = params;
 
   try {
-    const userRecord = await auth.getUserByEmail(email);
+    const authInstance = await auth;
+    const userRecord = await authInstance.getUserByEmail(email);
     if (!userRecord)
       return {
         success: false,
@@ -79,8 +82,9 @@ export async function signIn(params: SignInParams) {
       };
 
     await setSessionCookie(idToken);
+    return { success: true };
   } catch (error: any) {
-    console.log("");
+    console.error("signIn failed:", error);
 
     return {
       success: false,
@@ -104,10 +108,16 @@ export async function getCurrentUser(): Promise<User | null> {
   if (!sessionCookie) return null;
 
   try {
-    const decodedClaims = await auth.verifySessionCookie(sessionCookie, true);
+    const authInstance = await auth;
+    const dbInstance = await db;
+
+    const decodedClaims = await authInstance.verifySessionCookie(
+      sessionCookie,
+      true
+    );
 
     // get user info from db
-    const userRecord = await db
+    const userRecord = await dbInstance
       .collection("users")
       .doc(decodedClaims.uid)
       .get();
