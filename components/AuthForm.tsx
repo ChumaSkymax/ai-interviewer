@@ -69,7 +69,9 @@ const AuthForm = ({ type }: { type: FormType }) => {
         const signInResult = await signIn({ email, idToken });
 
         if (!signInResult?.success) {
-          toast.error(signInResult?.message ?? "Sign in failed. Please sign in manually.");
+          toast.error(
+            signInResult?.message ?? "Sign in failed. Please sign in manually."
+          );
           router.push("/sign-in");
           return;
         }
@@ -95,7 +97,9 @@ const AuthForm = ({ type }: { type: FormType }) => {
         const signInResult = await signIn({ email, idToken });
 
         if (!signInResult?.success) {
-          toast.error(signInResult?.message ?? "Sign in failed. Please try again.");
+          toast.error(
+            signInResult?.message ?? "Sign in failed. Please try again."
+          );
           return;
         }
 
@@ -108,7 +112,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
       toast.error(`There was an error: ${error}`);
     }
   };
-
+  // Check if the user is sign in
   const isSignIn = type === "sign-in";
 
   return (
