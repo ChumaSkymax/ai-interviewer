@@ -77,8 +77,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
         }
 
         toast.success("Account created and signed in successfully.");
-        router.refresh();
-        router.push("/");
+        window.location.assign("/");
       } else {
         const { email, password } = data;
 
@@ -104,8 +103,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
         }
 
         toast.success("Signed in successfully.");
-        router.refresh();
-        router.push("/");
+        window.location.assign("/");
       }
     } catch (error) {
       console.log(error);
