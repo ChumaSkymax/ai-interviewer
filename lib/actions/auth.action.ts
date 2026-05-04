@@ -74,12 +74,25 @@ export async function signIn(params: SignInParams) {
 
   try {
     const authInstance = await auth;
+    const dbInstance = await db;
+
     const userRecord = await authInstance.getUserByEmail(email);
     if (!userRecord)
       return {
         success: false,
         message: "User does not exist. Create an account.",
       };
+
+    // Self-heal: ensure a Firestore profile exists so getCurrentUser
+    // doesn't return null and bounce the user back to /sign-in.
+    const profileRef = dbInstance.collection("users").doc(userRecord.uid);
+    const profileSnap = await profileRef.get();
+    if (!profileSnap.exists) {
+      await profileRef.set({
+        name: userRecord.displayName ?? email.split("@")[0],
+        email,
+      });
+    }
 
     await setSessionCookie(idToken);
     return { success: true };
@@ -116,19 +129,30 @@ export async function getCurrentUser(): Promise<User | null> {
       true
     );
 
-    // get user info from db
     const userRecord = await dbInstance
       .collection("users")
       .doc(decodedClaims.uid)
       .get();
-    if (!userRecord.exists) return null;
+
+    // If the Firestore profile is missing, fall back to the verified
+    // session claims so the user isn't redirected back to /sign-in.
+    if (!userRecord.exists) {
+      return {
+        id: decodedClaims.uid,
+        email: decodedClaims.email ?? "",
+        name:
+          (decodedClaims.name as string | undefined) ??
+          decodedClaims.email?.split("@")[0] ??
+          "",
+      } as User;
+    }
 
     return {
       ...userRecord.data(),
       id: userRecord.id,
     } as User;
   } catch (error) {
-    console.log(error);
+    console.error("getCurrentUser failed:", error);
 
     // Invalid or expired session
     return null;
