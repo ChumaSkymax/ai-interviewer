@@ -1,25 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LoaderCircle, PhoneCall, PhoneOff, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { vapi } from "@/lib/vapi.sdk";
-import { interviewer } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
-
-enum CallStatus {
-  INACTIVE = "INACTIVE",
-  CONNECTING = "CONNECTING",
-  ACTIVE = "ACTIVE",
-  FINISHED = "FINISHED",
-}
-
-interface SavedMessage {
-  role: "user" | "system" | "assistant";
-  content: string;
-}
+import { useVapi } from "@/hooks/useVapi";
 
 const Agent = ({
   userName,
@@ -30,66 +18,24 @@ const Agent = ({
   questions,
 }: AgentProps) => {
   const router = useRouter();
-  const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
-  const [messages, setMessages] = useState<SavedMessage[]>([]);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [lastMessage, setLastMessage] = useState<string>("");
-
-  useEffect(() => {
-    const onCallStart = () => {
-      setCallStatus(CallStatus.ACTIVE);
-    };
-
-    const onCallEnd = () => {
-      setCallStatus(CallStatus.FINISHED);
-    };
-
-    const onMessage = (message: Message) => {
-      if (message.type === "transcript" && message.transcriptType === "final") {
-        const newMessage = { role: message.role, content: message.transcript };
-        setMessages((prev) => [...prev, newMessage]);
-      }
-    };
-
-    const onSpeechStart = () => {
-      console.log("speech start");
-      setIsSpeaking(true);
-    };
-
-    const onSpeechEnd = () => {
-      console.log("speech end");
-      setIsSpeaking(false);
-    };
-
-    const onError = (error: Error) => {
-      console.log("Error:", error);
-    };
-
-    vapi.on("call-start", onCallStart);
-    vapi.on("call-end", onCallEnd);
-    vapi.on("message", onMessage);
-    vapi.on("speech-start", onSpeechStart);
-    vapi.on("speech-end", onSpeechEnd);
-    vapi.on("error", onError);
-
-    return () => {
-      vapi.off("call-start", onCallStart);
-      vapi.off("call-end", onCallEnd);
-      vapi.off("message", onMessage);
-      vapi.off("speech-start", onSpeechStart);
-      vapi.off("speech-end", onSpeechEnd);
-      vapi.off("error", onError);
-    };
-  }, []);
+  const { callStatus, messages, isSpeaking, startCall, stopCall } = useVapi();
+  const [lastMessage, setLastMessage] = useState("");
 
   useEffect(() => {
     if (messages.length > 0) {
       setLastMessage(messages[messages.length - 1].content);
     }
+  }, [messages]);
 
-    const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      console.log("handleGenerateFeedback");
+  useEffect(() => {
+    if (callStatus !== "FINISHED") return;
 
+    if (type === "generate") {
+      router.push("/");
+      return;
+    }
+
+    const handleFeedback = async () => {
       const { success, feedbackId: id } = await createFeedback({
         interviewId: interviewId!,
         userId: userId!,
@@ -105,44 +51,48 @@ const Agent = ({
       }
     };
 
-    if (callStatus === CallStatus.FINISHED) {
-      if (type === "generate") {
-        router.push("/");
-      } else {
-        handleGenerateFeedback(messages);
-      }
-    }
+    handleFeedback();
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
   const handleCall = async () => {
-    setCallStatus(CallStatus.CONNECTING);
-
     if (type === "generate") {
-      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
+      const assistantId = process.env.NEXT_PUBLIC_VAPI_ASSISTANT_ID;
+
+      if (!assistantId) {
+        console.error("Missing NEXT_PUBLIC_VAPI_ASSISTANT_ID");
+        return;
+      }
+
+      await startCall(assistantId, {
         variableValues: {
           username: userName,
           userid: userId,
         },
       });
-    } else {
-      let formattedQuestions = "";
-      if (questions) {
-        formattedQuestions = questions
-          .map((question) => `- ${question}`)
-          .join("\n");
-      }
 
-      await vapi.start(interviewer, {
-        variableValues: {
-          questions: formattedQuestions,
-        },
-      });
+      return;
     }
+
+    const assistantId = process.env.NEXT_PUBLIC_VAPI_ASSISTANT_ID;
+
+    if (!assistantId) {
+      console.error("Missing NEXT_PUBLIC_VAPI_ASSISTANT_ID");
+      return;
+    }
+
+    const formattedQuestions = questions
+      ?.map((question) => `- ${question}`)
+      .join("\n");
+
+    await startCall(assistantId, {
+      variableValues: {
+        questions: formattedQuestions,
+      },
+    });
   };
 
   const handleDisconnect = () => {
-    setCallStatus(CallStatus.FINISHED);
-    vapi.stop();
+    stopCall();
   };
 
   return (
@@ -196,23 +146,45 @@ const Agent = ({
 
       <div className="w-full flex justify-center">
         {callStatus !== "ACTIVE" ? (
-          <button className="relative btn-call" onClick={() => handleCall()}>
+          <button
+            className="group relative btn-call gap-2.5 bg-gradient-to-r from-success-100 via-primary-200 to-success-100 text-dark-100 shadow-[0_0_28px_rgba(202,197,254,0.34)] hover:shadow-[0_0_34px_rgba(73,222,80,0.34)] disabled:cursor-not-allowed disabled:opacity-80"
+            onClick={() => handleCall()}
+            disabled={callStatus === "CONNECTING"}
+          >
             <span
               className={cn(
-                "absolute animate-ping rounded-full opacity-75",
+                "absolute inset-0 animate-ping rounded-full bg-primary-200/40",
                 callStatus !== "CONNECTING" && "hidden"
               )}
             />
 
-            <span className="relative">
+            <span className="relative flex items-center gap-2">
+              {callStatus === "CONNECTING" ? (
+                <LoaderCircle
+                  className="size-4 animate-spin"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Sparkles
+                  className="size-4 transition-transform group-hover:scale-110"
+                  aria-hidden="true"
+                />
+              )}
               {callStatus === "INACTIVE" || callStatus === "FINISHED"
-                ? "Call"
-                : ". . ."}
+                ? "Start a Call"
+                : "Connecting"}
+              {callStatus !== "CONNECTING" && (
+                <PhoneCall className="size-4" aria-hidden="true" />
+              )}
             </span>
           </button>
         ) : (
-          <button className="btn-disconnect" onClick={() => handleDisconnect()}>
-            End
+          <button
+            className="btn-disconnect gap-2.5 shadow-[0_0_26px_rgba(247,83,83,0.26)]"
+            onClick={() => handleDisconnect()}
+          >
+            <span>End</span>
+            <PhoneOff className="size-4" aria-hidden="true" />
           </button>
         )}
       </div>
