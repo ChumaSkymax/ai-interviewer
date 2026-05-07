@@ -1,8 +1,10 @@
 import { generateText } from "ai";
-import { google } from "@ai-sdk/google";
+// import { google } from "@ai-sdk/google";
+import { openai } from "@ai-sdk/openai";
 
 import { db } from "@/firebase/admin";
 import { getRandomInterviewCover } from "@/lib/utils";
+import { google } from "@ai-sdk/google";
 
 type GenerateArgs = {
   type?: unknown;
@@ -75,13 +77,19 @@ function getVariableValues(body: any): Record<string, unknown> {
 }
 
 function parseQuestions(text: string): string[] {
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  let parsed: unknown;
 
-  if (!jsonMatch) {
-    throw new Error("The model did not return a JSON array.");
+  try {
+    parsed = JSON.parse(text.trim());
+  } catch {
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+
+    if (!jsonMatch) {
+      throw new Error("The model did not return a JSON array.");
+    }
+
+    parsed = JSON.parse(jsonMatch[0]);
   }
-
-  const parsed = JSON.parse(jsonMatch[0]);
 
   if (
     !Array.isArray(parsed) ||
@@ -107,6 +115,49 @@ function vapiToolResponse(toolCallId: string, result: string, status = 200) {
   );
 }
 
+function getErrorDetails(error: unknown) {
+  const errorRecord =
+    error && typeof error === "object"
+      ? (error as Record<string, unknown>)
+      : undefined;
+  const cause =
+    errorRecord?.cause && typeof errorRecord.cause === "object"
+      ? (errorRecord.cause as Record<string, unknown>)
+      : undefined;
+
+  const statusCode =
+    typeof errorRecord?.statusCode === "number"
+      ? errorRecord.statusCode
+      : typeof cause?.statusCode === "number"
+        ? cause.statusCode
+        : undefined;
+
+  const message =
+    error instanceof Error ? error.message : "Failed to generate interview.";
+
+  if (!process.env.OPENAI_API_KEY) {
+    return "OpenAI API key is missing on the server.";
+  }
+
+  if (statusCode === 401 || statusCode === 403) {
+    return "OpenAI rejected the API key or model access.";
+  }
+
+  if (statusCode === 429) {
+    return "OpenAI quota or rate limit was exceeded.";
+  }
+
+  if (statusCode && statusCode >= 500) {
+    return "OpenAI is temporarily unavailable.";
+  }
+
+  if (message.includes("maxRetriesExceeded")) {
+    return "OpenAI request failed after retries. Check API key, quota, and model access.";
+  }
+
+  return message;
+}
+
 export async function POST(request: Request) {
   const body = await request.json();
   const toolCall = findToolCall(body);
@@ -127,9 +178,15 @@ export async function POST(request: Request) {
   const techstack = String(args.techstack ?? "").trim();
   const level = String(args.level ?? "").trim();
   const amount = Number(args.amount ?? 5);
-  const userid = String(args.userid ?? variableValues.userid ?? "").trim();
+  const useridFromArgs = String(args.userid ?? "").trim();
+  const useridFromVariables = String(variableValues.userid ?? "").trim();
+  const userid = useridFromArgs || useridFromVariables;
 
   try {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error("OpenAI API key is missing on the server.");
+    }
+
     if (!type || !role || !techstack || !level || !userid || !amount) {
       throw new Error(
         "Missing required fields: role, type, level, techstack, amount, or userid."
@@ -139,7 +196,7 @@ export async function POST(request: Request) {
     const safeQuestions = amount > 0 && amount <= 20 ? amount : 5;
 
     const { text } = await generateText({
-      model: google("gemini-2.0-flash-001"),
+      model: openai("gpt-4o-mini"),
       prompt: `
 Generate ${safeQuestions} interview questions.
 
@@ -201,8 +258,7 @@ Rules:
     );
   } catch (error) {
     console.error("Error generating interview:", error);
-    const message =
-      error instanceof Error ? error.message : "Failed to generate interview.";
+    const message = getErrorDetails(error);
 
     if (toolCallId) {
       return vapiToolResponse(

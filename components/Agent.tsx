@@ -63,6 +63,11 @@ const Agent = ({
         return;
       }
 
+      if (!userId) {
+        console.error("Cannot start generation call without a user id");
+        return;
+      }
+
       await startCall(assistantId, {
         variableValues: {
           username: userName,
