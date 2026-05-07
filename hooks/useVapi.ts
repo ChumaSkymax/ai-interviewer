@@ -1,18 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { AssistantOverrides, CreateAssistantDTO } from "@vapi-ai/web/dist/api";
-
+import { useState, useEffect } from "react";
 import { vapi } from "@/lib/vapi.sdk";
 
 export type CallStatus = "INACTIVE" | "CONNECTING" | "ACTIVE" | "FINISHED";
 
-export interface SavedMessage {
+interface SavedMessage {
   role: "user" | "system" | "assistant";
   content: string;
 }
-
-type StartableAssistant = CreateAssistantDTO | string;
 
 export const useVapi = () => {
   const [callStatus, setCallStatus] = useState<CallStatus>("INACTIVE");
@@ -20,39 +16,28 @@ export const useVapi = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   useEffect(() => {
-    const onCallStart = () => {
-      setCallStatus("ACTIVE");
-    };
+    const onCallStart = () => setCallStatus("ACTIVE");
 
-    const onCallEnd = () => {
-      setCallStatus("FINISHED");
-      setIsSpeaking(false);
-    };
+    const onCallEnd = () => setCallStatus("FINISHED");
 
-    const onMessage = (message: Message) => {
+    const onMessage = (message: any) => {
       if (message.type === "transcript" && message.transcriptType === "final") {
         setMessages((prev) => [
           ...prev,
           {
-            role: message.role as SavedMessage["role"],
+            role: message.role,
             content: message.transcript,
           },
         ]);
       }
     };
 
-    const onSpeechStart = () => {
-      setIsSpeaking(true);
-    };
+    const onSpeechStart = () => setIsSpeaking(true);
+    const onSpeechEnd = () => setIsSpeaking(false);
 
-    const onSpeechEnd = () => {
-      setIsSpeaking(false);
-    };
-
-    const onError = (error: unknown) => {
-      console.error("Vapi error:", error);
-      setCallStatus("INACTIVE");
-      setIsSpeaking(false);
+    const onError = (error: Error) => {
+      console.log("Vapi Error:", error);
+      setCallStatus("FINISHED");
     };
 
     vapi.on("call-start", onCallStart);
@@ -72,27 +57,15 @@ export const useVapi = () => {
     };
   }, []);
 
-  const startCall = useCallback(
-    async (assistant: StartableAssistant, assistantOverrides?: AssistantOverrides) => {
-      setMessages([]);
-      setCallStatus("CONNECTING");
+  const startCall = async (id: string, options?: any) => {
+    setCallStatus("CONNECTING");
+    await vapi.start(id, options);
+  };
 
-      const call = await vapi.start(assistant, assistantOverrides);
-
-      if (!call) {
-        setCallStatus("INACTIVE");
-      }
-
-      return call;
-    },
-    []
-  );
-
-  const stopCall = useCallback(() => {
+  const stopCall = () => {
     setCallStatus("FINISHED");
-    setIsSpeaking(false);
     vapi.stop();
-  }, []);
+  };
 
   return {
     callStatus,
@@ -102,5 +75,3 @@ export const useVapi = () => {
     stopCall,
   };
 };
-
-export default useVapi;

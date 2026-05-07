@@ -4,49 +4,220 @@ import { google } from "@ai-sdk/google";
 import { db } from "@/firebase/admin";
 import { getRandomInterviewCover } from "@/lib/utils";
 
+type GenerateArgs = {
+  type?: unknown;
+  role?: unknown;
+  techstack?: unknown;
+  level?: unknown;
+  amount?: unknown;
+  userid?: unknown;
+};
+
+type VapiToolCall = {
+  id?: string;
+  name?: string;
+  arguments?: unknown;
+  parameters?: unknown;
+  function?: {
+    name?: string;
+    arguments?: unknown;
+    parameters?: unknown;
+  };
+};
+
+function parseArguments(rawArgs: unknown): Record<string, unknown> {
+  if (!rawArgs) return {};
+
+  if (typeof rawArgs === "string") {
+    try {
+      return JSON.parse(rawArgs);
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof rawArgs === "object") {
+    return rawArgs as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function findToolCall(body: any): VapiToolCall | undefined {
+  const toolCalls =
+    body?.message?.toolCallList ??
+    body?.message?.toolCalls ??
+    body?.messages?.toolCallList ??
+    body?.messages?.toolCalls ??
+    body?.toolCallList ??
+    body?.toolCalls;
+
+  if (Array.isArray(toolCalls)) {
+    return (
+      toolCalls.find(
+        (call: VapiToolCall) =>
+          call.name === "generate" || call.function?.name === "generate"
+      ) ?? toolCalls[0]
+    );
+  }
+
+  return undefined;
+}
+
+function getVariableValues(body: any): Record<string, unknown> {
+  return (
+    body?.message?.call?.assistantOverrides?.variableValues ??
+    body?.message?.assistantOverrides?.variableValues ??
+    body?.call?.assistantOverrides?.variableValues ??
+    body?.assistantOverrides?.variableValues ??
+    {}
+  );
+}
+
+function parseQuestions(text: string): string[] {
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+
+  if (!jsonMatch) {
+    throw new Error("The model did not return a JSON array.");
+  }
+
+  const parsed = JSON.parse(jsonMatch[0]);
+
+  if (
+    !Array.isArray(parsed) ||
+    parsed.some((item) => typeof item !== "string")
+  ) {
+    throw new Error("The generated questions were not a string array.");
+  }
+
+  return parsed;
+}
+
+function vapiToolResponse(toolCallId: string, result: string, status = 200) {
+  return Response.json(
+    {
+      results: [
+        {
+          toolCallId,
+          result,
+        },
+      ],
+    },
+    { status }
+  );
+}
+
 export async function POST(request: Request) {
-  const { type, role, level, techstack, amount, userid } = await request.json();
-  const dbInstance = await db;
+  const body = await request.json();
+  const toolCall = findToolCall(body);
+  const toolCallId = toolCall?.id;
+
+  const rawArgs =
+    toolCall?.function?.arguments ??
+    toolCall?.function?.parameters ??
+    toolCall?.arguments ??
+    toolCall?.parameters ??
+    body;
+
+  const args = parseArguments(rawArgs) as GenerateArgs;
+  const variableValues = getVariableValues(body);
+
+  const type = String(args.type ?? "").trim();
+  const role = String(args.role ?? "").trim();
+  const techstack = String(args.techstack ?? "").trim();
+  const level = String(args.level ?? "").trim();
+  const amount = Number(args.amount ?? 5);
+  const userid = String(args.userid ?? variableValues.userid ?? "").trim();
 
   try {
-    const { text: questions } = await generateText({
+    if (!type || !role || !techstack || !level || !userid || !amount) {
+      throw new Error(
+        "Missing required fields: role, type, level, techstack, amount, or userid."
+      );
+    }
+
+    const safeQuestions = amount > 0 && amount <= 20 ? amount : 5;
+
+    const { text } = await generateText({
       model: google("gemini-2.0-flash-001"),
-      prompt: `Prepare questions for a job interview.
-        The job role is ${role}.
-        The job experience level is ${level}.
-        The tech stack used in the job is: ${techstack}.
-        The focus between behavioural and technical questions should lean towards: ${type}.
-        The amount of questions required is: ${amount}.
-        Please return only the questions, without any additional text.
-        The questions are going to be read by a voice assistant so do not use "/" or "*" or any other special characters which might break the voice assistant.
-        Return the questions formatted like this:
-        ["Question 1", "Question 2", "Question 3"]
-        
-        Thank you! <3
-    `,
+      prompt: `
+Generate ${safeQuestions} interview questions.
+
+Role:
+${role}
+
+Experience Level:
+${level}
+
+Interview Type:
+${type}
+
+Tech Stack:
+${techstack}
+
+Rules:
+- Return ONLY a valid JSON array
+- Do not include markdown
+- Do not include explanations
+- Do not include numbering
+- Do not include code blocks
+- Keep questions concise and natural
+- Questions will be read by a voice assistant
+- Avoid special characters like "*" or "/"
+- Return the questions formatted like this: ["Question 1", "Question 2", "Question 3"]
+      `,
     });
 
+    const questions = parseQuestions(text);
+    const dbInstance = await db;
+
     const interview = {
-      role: role,
-      type: type,
-      level: level,
-      techstack: techstack.split(","),
-      questions: JSON.parse(questions),
+      role,
+      type,
+      level,
+      techstack: techstack
+        .split(",")
+        .map((tech) => tech.trim())
+        .filter(Boolean),
+      questions,
       userId: userid,
       finalized: true,
       coverImage: getRandomInterviewCover(),
       createdAt: new Date().toISOString(),
     };
 
-    await dbInstance.collection("interviews").add(interview);
+    const interviewRef = await dbInstance
+      .collection("interviews")
+      .add(interview);
+    const result = `Interview generated and saved successfully. Interview ID: ${interviewRef.id}`;
 
-    return Response.json({ success: true }, { status: 200 });
+    if (toolCallId) {
+      return vapiToolResponse(toolCallId, result);
+    }
+
+    return Response.json(
+      { success: true, interviewId: interviewRef.id, interview },
+      { status: 200 }
+    );
   } catch (error) {
-    console.error("Error:", error);
-    return Response.json({ success: false, error: error }, { status: 500 });
+    console.error("Error generating interview:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to generate interview.";
+
+    if (toolCallId) {
+      return vapiToolResponse(
+        toolCallId,
+        `Interview generation failed: ${message}`
+      );
+    }
+
+    return Response.json({ success: false, error: message }, { status: 500 });
   }
 }
 
 export async function GET() {
-  return Response.json({ success: true, data: "Thank you!" }, { status: 200 });
+  return Response.json({
+    success: true,
+    data: "Vapi generate endpoint is ready.",
+  });
 }
