@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { LoaderCircle, PhoneCall, PhoneOff, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { interviewer } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
 import { useVapi } from "@/hooks/useVapi";
 
@@ -86,6 +85,13 @@ const Agent = ({
     }
 
     if (type === "interview") {
+      const assistantId = process.env.NEXT_PUBLIC_VAPI_INTERVIEW_ASSISTANT_ID;
+
+      if (!assistantId) {
+        console.error("Missing NEXT_PUBLIC_VAPI_INTERVIEW_ASSISTANT_ID");
+        return;
+      }
+
       if (!userId) {
         console.error("Cannot start interview call without a user id");
         return;
@@ -95,7 +101,7 @@ const Agent = ({
         ?.map((question) => `- ${question}`)
         .join("\n");
 
-      await startCall(interviewer, {
+      await startCall(assistantId, {
         variableValues: {
           questions: formattedQuestions,
         },
