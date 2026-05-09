@@ -1,5 +1,6 @@
 "use client";
 
+import type { AssistantOverrides, CreateAssistantDTO } from "@vapi-ai/web/dist/api";
 import { useState, useEffect } from "react";
 import { vapi } from "@/lib/vapi.sdk";
 
@@ -57,9 +58,12 @@ export const useVapi = () => {
     };
   }, []);
 
-  const startCall = async (id: string, options?: any) => {
+  const startCall = async (
+    assistant: string | CreateAssistantDTO,
+    assistantOverrides?: AssistantOverrides
+  ) => {
     setCallStatus("CONNECTING");
-    await vapi.start(id, options);
+    await vapi.start(assistant, assistantOverrides);
   };
 
   const stopCall = () => {

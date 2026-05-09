@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { LoaderCircle, PhoneCall, PhoneOff, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { interviewer } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
 import { useVapi } from "@/hooks/useVapi";
 
@@ -31,6 +32,12 @@ const Agent = ({
     if (callStatus !== "FINISHED") return;
 
     if (type === "generate") {
+      router.push("/");
+      return;
+    }
+
+    if (messages.length === 0) {
+      console.log("No transcript available for feedback");
       router.push("/");
       return;
     }
@@ -78,22 +85,24 @@ const Agent = ({
       return;
     }
 
-    const assistantId = process.env.NEXT_PUBLIC_VAPI_ASSISTANT_ID;
+    if (type === "interview") {
+      if (!userId) {
+        console.error("Cannot start interview call without a user id");
+        return;
+      }
 
-    if (!assistantId) {
-      console.error("Missing NEXT_PUBLIC_VAPI_ASSISTANT_ID");
+      const formattedQuestions = questions
+        ?.map((question) => `- ${question}`)
+        .join("\n");
+
+      await startCall(interviewer, {
+        variableValues: {
+          questions: formattedQuestions,
+        },
+      });
+
       return;
     }
-
-    const formattedQuestions = questions
-      ?.map((question) => `- ${question}`)
-      .join("\n");
-
-    await startCall(assistantId, {
-      variableValues: {
-        questions: formattedQuestions,
-      },
-    });
   };
 
   const handleDisconnect = () => {
