@@ -113,7 +113,7 @@ export const interviewer: CreateAssistantDTO = {
     provider: "11labs",
 
     // Your ElevenLabs Voice ID
-    voiceId: "EIsgvJT3rwoPvRFG6c4n",
+    voiceId: "wWWn96OtTHu1sn8SRGEr",
 
     // Recommended model for real-time AI conversations
     model: "eleven_turbo_v2_5",
