@@ -36,8 +36,15 @@ export const useVapi = () => {
     const onSpeechStart = () => setIsSpeaking(true);
     const onSpeechEnd = () => setIsSpeaking(false);
 
-    const onError = (error: Error) => {
+    const onError = (error: unknown) => {
       console.log("Vapi Error:", error);
+
+      try {
+        console.log("Vapi Error Details:", JSON.stringify(error, null, 2));
+      } catch {
+        console.log("Could not stringify Vapi error");
+      }
+
       setCallStatus("FINISHED");
     };
 
